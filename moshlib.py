@@ -1,12 +1,10 @@
 #!/usr/bin/env python
+import requests as req
 from PIL import Image
-import argparse
-import os, sys
-import string
-import random
-import ConfigParser
 from subprocess import call
 from random import randint
+from os.path import isfile
+import os, sys, string, random, argparse, ConfigParser
 
 Config = ConfigParser.ConfigParser()
 Config.read('conf.ini')
@@ -30,11 +28,27 @@ def filelen(infile):
             pass
         return i + 1
 
+def save_file_url(url):
+    try:
+        filename = url.split('/')[-1]
+    except IndexError:
+        print "doesn't seem to be either a local file or a url..."
+        return
+    response = req.get(url)
+    if response.status_code == 200 or 304:
+        img_file = open(filename, 'wb')
+        img_file.write(response.content)
+        img_file.close()
+        print "\nfetched image file %s" % filename
+        return filename
+    else:
+        print "Bad response (%s) from server for this URL" % response.status_code
+
 def handle_options():
     defaults = configmap('Defaults')
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("input_files")
+    parser.add_argument("input_file")
     parser.add_argument("-f", "--frames", default=defaults['animation_frames'],
         type=int, help="Number of frames for the animation")
     parser.add_argument("-d", "--delay", default=defaults['animation_delay'],
@@ -48,10 +62,15 @@ def handle_options():
     parser.add_argument("-r", "--rotate", default=defaults['rotation_chance'], 
         type=int, help="Chance of image rotation")
     parser.add_argument("-i", "--interactive", default=False, 
-        type=int, help="Chance of image rotation")
+        type=int, help="Turn on prompt-based interface")
 
-    return parser.parse_args()
+    opts = parser.parse_args()
 
+    if not isfile(opts.input_file):                           # if we don't find it,
+        opts.input_file = save_file_url(opts.input_file)      # assume it's a URL
+    
+    return opts
+    
 
 def convertbmp(infile, outfile):
     outfile = outfile.split('.')[0] + '.bmp'
@@ -197,5 +216,5 @@ def animateglitch(infile, frames, anim_delay, glitch_amount):
 
 
 opts = handle_options()
-animateglitch(opts.input_files, opts.frames, opts.delay, opts.amount)
+animateglitch(opts.input_file, opts.frames, opts.delay, opts.amount)
 
