@@ -2,8 +2,9 @@
 import requests as req
 from PIL import Image
 from subprocess import call
-from random import randint
+from random import randint, choice
 from os.path import isfile
+import binascii
 import os, sys, string, random, argparse, ConfigParser
 
 Config = ConfigParser.ConfigParser()
@@ -34,12 +35,11 @@ def save_file_url(url):
     except IndexError:
         print "doesn't seem to be either a local file or a url..."
         return
+
     response = req.get(url)
     if response.status_code == 200 or 304:
-        img_file = open(filename, 'wb')
-        img_file.write(response.content)
-        img_file.close()
-        print "\nfetched image file %s" % filename
+        open(filename, 'wb').write(response.content)
+        print "\nfetched image file: %s" % filename
         return filename
     else:
         print "Bad response (%s) from server for this URL" % response.status_code
@@ -81,6 +81,13 @@ def convertbmp(infile, outfile):
     except IOError:
         return ("Cannot process", infile)
 
+def is_bmp(filename):
+    if open(filename, "rb").read(2) == "BM":    
+        return True
+    else:
+        return False
+
+
 class Gifscythe():                                 # methods using Gifsicle
     
     def finalize(self, input_gif):
@@ -121,14 +128,39 @@ class ImageMage():                                 # handles ImageMagick-based g
         call(IM_command, shell=True)
             
             
+class Editor():
 
+    def junk(self, filename, amount, width, line_processor):
+        buffer_lines = open(filename, "rb").readlines()
+        targets = [randint(2, len(buffer_lines)) for n in range(amount)]
+
+        for index in targets:
+            for line in range(index, index + width):
+                buffer_lines[line] = line_processor(buffer_lines[line])
+            
+        outfile = open('junked-' + filename, "wb")
+        outfile.write(''.join(buffer_lines))    
+
+    def write_junk_line(self, buffer_line):
+        payload = ''.join(choice(string.hexdigits) for i in range(0, choice(range(0,24,2))))
+        bin_payload = binascii.a2b_hex(payload)       
+        return bin_payload + buffer_line
+
+    def write_blank_line(self, buffer_line):
+        return "\n"
+
+    def insert_junk(self, filename, amount, width):
+        self.junk(filename, amount, width, self.write_junk_line)
+
+    def delete_junk(self, filename, amount, width):
+        self.junk(filename, amount, width, self.write_blank_line)
+
+# DEPRECATED, DON'T USE IT
 class SedSorceror():                               # handles sed-based effects
 
     def __init__(self, image):
         self.filelength = filelen(image)
         print ("File length is %s lines" % self.filelength)
-        #basic implementation of the config file below
-        #we can discuss which params we want to offload to the ini file later
         self.headerdifferential = configmap('Settings')['headerdifferential']
         self.endheader = int(self.filelength * float(self.headerdifferential)) + 2
         if self.endheader > 200:
@@ -136,9 +168,9 @@ class SedSorceror():                               # handles sed-based effects
         print "End of header approximated at line %s" % self.endheader
 
     def rgb_wiggle(self, filename, outfile, cutcount):
-        targets = [''.join(random.choice(string.hexdigits) for n in range(0,2)) for n in range (0,30)]
+        targets = [''.join(choice(string.hexdigits) for n in range(0,2)) for n in range (0,30)]
         for i in range(cutcount):
-            target = random.choice(targets)
+            target = choice(targets)
             start = randint(self.endheader, int(self.filelength * 0.90))
 
             if randint(0,100) > 66:
@@ -146,7 +178,7 @@ class SedSorceror():                               # handles sed-based effects
             else:
                 end = str(randint(start + 1, self.filelength))
 
-            payload = ''.join(random.choice(string.hexdigits) for i in range(randint(0,12)))
+            payload = ''.join(choice(string.hexdigits) for i in range(randint(0,12)))
             
             if i == 0:
                 sedcommand = "sed '%i,%s s/%s/%s/g' %s > %s" % (start, end, target, payload, filename, outfile)
@@ -156,18 +188,6 @@ class SedSorceror():                               # handles sed-based effects
             print "On lines %s through line %s, '%s' will be replaced with '%s'" % (start, end, target, payload)
             call(sedcommand, shell=True)
             filename = outfile
-
-    # makes viewable BMPs but both PIL and Imagemagick seem to think they're broken
-    def del_chunks(self, filename, outfile, chunkcount):
-        for i in range(chunkcount):
-            start = randint(self.endheader+100, int(self.filelength * 0.90))
-            end = randint(start + 1, start+40)
-            if i == 0:
-                sedcommand = "sed -e '%i,%id' %s > %s" % (start, end, filename, outfile)
-            else:
-                sedcommand = "sed -i -e '%i,%id' %s" % (start, end, outfile)
-            print sedcommand
-            call(sedcommand, shell=True)
 
 def glitchbmp(infile, outfile, amount):
     """
@@ -215,6 +235,6 @@ def animateglitch(infile, frames, anim_delay, glitch_amount):
     call("rm glitch*.bmp convert*.bmp", shell=True)
 
 
-opts = handle_options()
-animateglitch(opts.input_file, opts.frames, opts.delay, opts.amount)
+#opts = handle_options()
+#animateglitch(opts.input_file, opts.frames, opts.delay, opts.amount)
 
