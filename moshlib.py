@@ -4,6 +4,7 @@ from PIL import Image
 from subprocess import call
 from random import randint, choice
 from os.path import isfile
+from binascii import a2b_hex
 import binascii
 import os, sys, string, random, argparse, ConfigParser
 
@@ -130,15 +131,25 @@ class ImageMage():                                 # handles ImageMagick-based g
             
 class Editor():
 
-    def junk(self, filename, amount, width, line_processor):
+    def __init__(self):
+        self.regex_targets = [a2b_hex(''.join(choice(string.hexdigits) 
+                                for n in range(0,4,2))) for n in range (0,20)]
+        self.regex_payloads = [a2b_hex(''.join(choice(string.hexdigits) 
+                                for i in range(0, choice(range(0,24,2))))) for n in range(24)]
+
+    def random_line_processor(self, filename, amount, width, line_processor):
         buffer_lines = open(filename, "rb").readlines()
         targets = [randint(2, len(buffer_lines)) for n in range(amount)]
 
         for index in targets:
+            print index, width
             for line in range(index, index + width):
-                buffer_lines[line] = line_processor(buffer_lines[line])
+                try:
+                    buffer_lines[line] = line_processor(buffer_lines[line])
+                except IndexError:
+                    pass
             
-        outfile = open('junked-' + filename, "wb")
+        outfile = open('glitched-' + filename, "wb")
         outfile.write(''.join(buffer_lines))    
 
     def write_junk_line(self, buffer_line):
@@ -149,11 +160,19 @@ class Editor():
     def write_blank_line(self, buffer_line):
         return "\n"
 
+    def replace_regex(self, buffer_line):
+        for target in self.regex_targets:
+            buffer_line = buffer_line.replace(target, choice(self.regex_payloads))
+        return buffer_line                
+
+    def replace_junk(self, filename, amount, width):
+        self.random_line_processor(filename, amount, width, self.replace_regex)
+
     def insert_junk(self, filename, amount, width):
-        self.junk(filename, amount, width, self.write_junk_line)
+        self.random_line_processor(filename, amount, width, self.write_junk_line)
 
     def delete_junk(self, filename, amount, width):
-        self.junk(filename, amount, width, self.write_blank_line)
+        self.random_line_processor(filename, amount, width, self.write_blank_line)
 
 # DEPRECATED, DON'T USE IT
 class SedSorceror():                               # handles sed-based effects
@@ -189,7 +208,7 @@ class SedSorceror():                               # handles sed-based effects
             call(sedcommand, shell=True)
             filename = outfile
 
-def glitchbmp(infile, outfile, amount):
+def glitchbmp_old(infile, outfile, amount):
     """
     infile is an image file
     outfile is the name of the bent output file (can include .bmp or be a single word)
@@ -211,6 +230,23 @@ def glitchbmp(infile, outfile, amount):
 
     return outfile
 
+def glitchbmp(infile, outfile, amount):
+    outfile = outfile.split('.')[0] + '.bmp'
+    ed = Editor()
+    mage = ImageMage()
+    
+    rotated = mage.random_rotate(infile, opts.rotate)
+    print infile
+    ed.replace_junk(infile, amount, choice(range(2,12)))
+    if rotated:
+        print "File was rotated, trying to unrotate %s ..." % outfile
+        mage.unrotate(outfile)
+        mage.unrotate(infile)
+
+    mage.color_jitter(outfile, randint(10,30))
+    mage.flashing_lights(outfile, randint(10,30))
+
+    return outfile
 
 def animateglitch(infile, frames, anim_delay, glitch_amount):
 
@@ -235,6 +271,6 @@ def animateglitch(infile, frames, anim_delay, glitch_amount):
     call("rm glitch*.bmp convert*.bmp", shell=True)
 
 
-#opts = handle_options()
-#animateglitch(opts.input_file, opts.frames, opts.delay, opts.amount)
+opts = handle_options()
+animateglitch(opts.input_file, opts.frames, opts.delay, opts.amount)
 
