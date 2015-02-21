@@ -2,33 +2,14 @@
 import requests as req
 from PIL import Image
 from subprocess import call
-from random import randint, choice
+from random import randint, choice, shuffle
 from os.path import isfile
 from binascii import a2b_hex
-import binascii
-import os, sys, string, random, argparse, ConfigParser
+from collections import namedtuple
+import os, sys, string, argparse, json
 
-Config = ConfigParser.ConfigParser()
-Config.read('conf.ini')
-
-def configmap(section):
-    dict1 = {}
-    options = Config.options(section)
-    for option in options:
-        try:
-            dict1[option] = Config.get(section, option)
-            if dict1[option] == -1:
-                DebugPrint("skip: %s" % option)
-        except:
-            print("exception on %s!" % option)
-            dict1[option] = None
-    return dict1
-
-def filelen(infile):
-    with open(infile) as f:
-        for i, l in enumerate(f):
-            pass
-        return i + 1
+def file_length(infile):
+    return len(open(infile).readlines())
 
 def save_file_url(url):
     try:
@@ -46,7 +27,7 @@ def save_file_url(url):
         print "Bad response (%s) from server for this URL" % response.status_code
 
 def handle_options():
-    defaults = configmap('Defaults')
+    defaults = json.loads(open("config.json").read())['defaults']
     parser = argparse.ArgumentParser()
 
     parser.add_argument("input_file")
@@ -55,7 +36,9 @@ def handle_options():
     parser.add_argument("-d", "--delay", default=defaults['animation_delay'],
         type=int, help="animation delay in 100ths of a second")
     parser.add_argument("-a", "--amount", default=defaults['glitch_amount'],
-        type=int, help="Text glitches per frame")
+        type=int, help="Amount of glitch locations per frame")
+    parser.add_argument("-w", "--width", default=defaults['width'],
+        type=int, help="lines per glitch location")
     parser.add_argument("-s", "--saturation", default=defaults['saturation'],
         type=int, help="Saturation change (100 is unchanged)")
     parser.add_argument("-c", "--colors", default=defaults['colors'],
@@ -130,34 +113,50 @@ class ImageMage():                                 # handles ImageMagick-based g
             
             
 class Editor():
-
+    
+    # these list comprehensions generate arrays of random string data, run it to see
     def __init__(self):
         self.regex_targets = [a2b_hex(''.join(choice(string.hexdigits) 
                                 for n in range(0,4,2))) for n in range (0,20)]
         self.regex_payloads = [a2b_hex(''.join(choice(string.hexdigits) 
                                 for i in range(0, choice(range(0,24,2))))) for n in range(24)]
 
-    def random_line_processor(self, filename, amount, width, line_processor):
+    # move random pieces of specified width around in the image
+    def shuffle_chunks(self, filename, amount, width, frame=1):
+        lines = open(filename, "rb").readlines()
+        targets = [randint(2, len(lines)) for n in range(amount)]                
+        chunks = [{"start": n, "data": lines[n:n+width]} for n in targets]
+        start_points = [chunk['start'] for chunk in chunks]
+        shuffle(start_points)
+        shuffle(chunks)
+
+        for chunk in chunks:
+            chunk["start"] = start_points.pop()
+            chunk["indexes"] = [n for n in range(chunk["start"], width) if n < len(lines)]
+            for (i, value) in enumerate(chunk["indexes"]):
+                if i < len(chunk["data"]):
+                    lines[value] = chunk["data"][i]
+                
+        open("shuffled-%i-" % frame + filename, "wb").write(''.join(lines))    
+
+    # line_processor must be a function that accepts and returns a line in the right encoding   
+    def random_line_processor(self, filename, amount, width, line_processor, frame_num=1):
         buffer_lines = open(filename, "rb").readlines()
         targets = [randint(2, len(buffer_lines)) for n in range(amount)]
 
         for index in targets:
-            print index, width
             for line in range(index, index + width):
                 try:
                     buffer_lines[line] = line_processor(buffer_lines[line])
                 except IndexError:
                     pass
             
-        outfile = open('glitched-' + filename, "wb")
-        outfile.write(''.join(buffer_lines))    
+        open("glitched-%i-" % frame_num + filename, "wb").write(''.join(buffer_lines))    
 
     def write_junk_line(self, buffer_line):
-        payload = ''.join(choice(string.hexdigits) for i in range(0, choice(range(0,24,2))))
-        bin_payload = binascii.a2b_hex(payload)       
-        return bin_payload + buffer_line
+        return choice(self.regex_payloads) + buffer_line
 
-    def write_blank_line(self, buffer_line):
+    def write_blank_line(self, _):
         return "\n"
 
     def replace_regex(self, buffer_line):
@@ -165,32 +164,27 @@ class Editor():
             buffer_line = buffer_line.replace(target, choice(self.regex_payloads))
         return buffer_line                
 
-    def replace_junk(self, filename, amount, width):
-        self.random_line_processor(filename, amount, width, self.replace_regex)
+    def replace_junk(self, filename, amount, width, frame=1):
+        self.random_line_processor(filename, amount, width, self.replace_regex, frame_num=frame)
 
-    def insert_junk(self, filename, amount, width):
-        self.random_line_processor(filename, amount, width, self.write_junk_line)
+    def insert_junk(self, filename, amount, width, frame=1):
+        self.random_line_processor(filename, amount, width, self.write_junk_line, frame_num=frame)
 
-    def delete_junk(self, filename, amount, width):
-        self.random_line_processor(filename, amount, width, self.write_blank_line)
+    def delete_junk(self, filename, amount, width, frame=1):
+        self.random_line_processor(filename, amount, width, self.write_blank_line, frame_num=frame)
 
-# DEPRECATED, DON'T USE IT
+
+# DEPRECATED, DON'T USE IT (though it does have a certain look to it)
 class SedSorceror():                               # handles sed-based effects
 
     def __init__(self, image):
-        self.filelength = filelen(image)
-        print ("File length is %s lines" % self.filelength)
-        self.headerdifferential = configmap('Settings')['headerdifferential']
-        self.endheader = int(self.filelength * float(self.headerdifferential)) + 2
-        if self.endheader > 200:
-            self.endheader =200
-        print "End of header approximated at line %s" % self.endheader
+        self.filelength = file_length(image)
 
     def rgb_wiggle(self, filename, outfile, cutcount):
         targets = [''.join(choice(string.hexdigits) for n in range(0,2)) for n in range (0,30)]
         for i in range(cutcount):
             target = choice(targets)
-            start = randint(self.endheader, int(self.filelength * 0.90))
+            start = randint(2, int(self.filelength * 0.90))
 
             if randint(0,100) > 66:
                 end = "$" # end of file
@@ -209,10 +203,6 @@ class SedSorceror():                               # handles sed-based effects
             filename = outfile
 
 def glitchbmp_old(infile, outfile, amount):
-    """
-    infile is an image file
-    outfile is the name of the bent output file (can include .bmp or be a single word)
-    """
     outfile = outfile.split('.')[0] + '.bmp'
 
     sed = SedSorceror(infile)
@@ -270,7 +260,4 @@ def animateglitch(infile, frames, anim_delay, glitch_amount):
     print "Done! Cleaning up...."
     call("rm glitch*.bmp convert*.bmp", shell=True)
 
-
-opts = handle_options()
-animateglitch(opts.input_file, opts.frames, opts.delay, opts.amount)
 
