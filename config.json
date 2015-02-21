@@ -1,0 +1,12 @@
+{
+  "defaults": 
+	{
+	  "animation_delay": 8,
+      "animation_frames": 16,
+      "colors": 64,
+      "glitch_amount": 10,
+      "width": 2,
+      "rotation_chance": 0,
+      "saturation": 100
+	}
+}
