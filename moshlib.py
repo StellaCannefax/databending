@@ -12,19 +12,17 @@ def file_length(infile):
     return len(open(infile).readlines())
 
 def save_file_url(url):
-    try:
-        filename = url.split('/')[-1]
-    except IndexError:
-        print "doesn't seem to be either a local file or a url..."
-        return
-
-    response = req.get(url)
-    if response.status_code == 200 or 304:
-        open(filename, 'wb').write(response.content)
-        print "\nfetched image file: %s" % filename
-        return filename
+    if url.match("http?://"):
+        response = req.get(url)
+        if response.status_code == 200 or 304:
+            open(filename, 'wb').write(response.content)
+            print "\nfetched image file: %s" % filename
+            return filename
+        else:
+            print "Bad response (%s) from server for this URL" % response.status_code
     else:
-        print "Bad response (%s) from server for this URL" % response.status_code
+        print "doesn't seem to be either a local file or a url..."
+        return 
 
 def handle_options():
     defaults = json.loads(open("config.json").read())['defaults']
@@ -121,17 +119,24 @@ class Editor():
         self.regex_payloads = [a2b_hex(''.join(choice(string.hexdigits) 
                                 for i in range(0, choice(range(0,24,2))))) for n in range(24)]
 
+    def split_header(self, lines):
+        if len(lines[0]) < 100:
+            return lines
+        else:
+            lines[0] = lines[0][:100] + "\n"
+            lines.insert(1, line[100:])
+        return lines
+
     # move random pieces of specified width around in the image
     def shuffle_chunks(self, filename, amount, width, frame=1):
-        lines = open(filename, "rb").readlines()
+        lines = self.split_header(open(filename, "rb").readlines())
         targets = [randint(2, len(lines)) for n in range(amount)]                
         chunks = [{"start": n, "data": lines[n:n+width]} for n in targets]
-        start_points = [chunk['start'] for chunk in chunks]
-        shuffle(start_points)
+        shuffle(targets)
         shuffle(chunks)
 
         for chunk in chunks:
-            chunk["start"] = start_points.pop()
+            chunk["start"] = targets.pop()
             chunk["indexes"] = [n for n in range(chunk["start"], width) if n < len(lines)]
             for (i, value) in enumerate(chunk["indexes"]):
                 if i < len(chunk["data"]):
@@ -141,15 +146,13 @@ class Editor():
 
     # line_processor must be a function that accepts and returns a line in the right encoding   
     def random_line_processor(self, filename, amount, width, line_processor, frame_num=1):
-        buffer_lines = open(filename, "rb").readlines()
+        buffer_lines = self.split_header(open(filename, "rb").readlines())
         targets = [randint(2, len(buffer_lines)) for n in range(amount)]
 
         for index in targets:
             for line in range(index, index + width):
-                try:
+                if line < len(buffer_lines):
                     buffer_lines[line] = line_processor(buffer_lines[line])
-                except IndexError:
-                    pass
             
         open("glitched-%i-" % frame_num + filename, "wb").write(''.join(buffer_lines))    
 
