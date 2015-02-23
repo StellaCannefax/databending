@@ -1,11 +1,10 @@
 #!/usr/bin/env python
-import requests as req
+import requests
 from PIL import Image
 from subprocess import call
 from random import randint, choice, shuffle
 from os.path import isfile
 from binascii import a2b_hex
-from collections import namedtuple
 import os, sys, string, argparse, json
 
 def file_length(infile):
@@ -13,7 +12,7 @@ def file_length(infile):
 
 def save_file_url(url):
     if url.match("http?://"):
-        response = req.get(url)
+        response = requests.get(url)
         if response.status_code == 200 or 304:
             open(filename, 'wb').write(response.content)
             print "\nfetched image file: %s" % filename
@@ -47,12 +46,10 @@ def handle_options():
         type=int, help="Turn on prompt-based interface")
 
     opts = parser.parse_args()
-
     if not isfile(opts.input_file):                           # if we don't find it,
         opts.input_file = save_file_url(opts.input_file)      # assume it's a URL
-    
+         
     return opts
-    
 
 def convertbmp(infile, outfile):
     outfile = outfile.split('.')[0] + '.bmp'
@@ -68,7 +65,6 @@ def is_bmp(filename):
         return True
     else:
         return False
-
 
 class Gifscythe():                                 # methods using Gifsicle
     
